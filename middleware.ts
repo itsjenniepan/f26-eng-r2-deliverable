@@ -28,6 +28,14 @@ export async function middleware(request: NextRequest) {
               headers: request.headers,
             },
           });
+          // Also write the refreshed cookie onto the response so the browser actually stores it. Without this the
+          // refreshed session is only used for this one request and the user gets logged out once the token expires.
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+          response.cookies.set({
+            name,
+            value,
+            ...options,
+          });
         },
         remove(name: string, options: CookieOptions) {
           // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
@@ -40,6 +48,12 @@ export async function middleware(request: NextRequest) {
             request: {
               headers: request.headers,
             },
+          });
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+          response.cookies.set({
+            name,
+            value: "",
+            ...options,
           });
         },
       },
