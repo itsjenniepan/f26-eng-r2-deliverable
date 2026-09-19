@@ -4,7 +4,8 @@ import Anthropic from "@anthropic-ai/sdk";
 // so the key never appears in source code. This file only runs on the server (via app/api/chat/route.ts).
 const client = new Anthropic();
 
-const MODEL = "claude-opus-5";
+// Haiku is fast and inexpensive, which is plenty for short factual species Q&A.
+const MODEL = "claude-haiku-4-5";
 
 const SYSTEM_PROMPT = `You are the Species Assistant for Biodiversity Hub, a website where researchers and ecologists log information about ecological species.
 
@@ -25,8 +26,6 @@ export async function generateResponse(message: string): Promise<string> {
       model: MODEL,
       max_tokens: 1024,
       system: SYSTEM_PROMPT,
-      // Short factual Q&A doesn't need deep reasoning; low effort keeps replies fast and cheap.
-      output_config: { effort: "low" },
       messages: [{ role: "user", content: message }],
     });
 
