@@ -1,5 +1,4 @@
 "use client";
-import { Button } from "@/components/ui/button";
 import { max } from "d3-array";
 import { axisBottom, axisLeft } from "d3-axis"; // D3 is a JavaScript library for data visualization: https://d3js.org/
 import { csv } from "d3-fetch";
@@ -18,30 +17,22 @@ interface AnimalDatum {
 
 const isDiet = (value: string): value is Diet => (DIETS as readonly string[]).includes(value);
 
-// 148 bars can't be read (or labelled) on one chart, so we show the fastest animals only. The diet filter re-ranks
-// within the chosen diet, and the summary underneath is computed from every animal.
-const TOP_N = 20;
-const MIN_WIDTH = 600;
-const HEIGHT = 520;
-const MARGIN = { top: 70, right: 30, bottom: 130, left: 70 };
-const MAX_BAR_WIDTH = 24;
+// 144 bars can't be read (or labelled) on one chart, so we show the fastest TOP_PER_DIET animals of each diet, grouped
+// side by side so the diets can be compared directly. The cards under the chart summarise every animal.
+const TOP_PER_DIET = 10;
+const MIN_WIDTH = 700;
+const HEIGHT = 500;
+const MARGIN = { top: 90, right: 30, bottom: 110, left: 70 };
 
-// One fixed colour per diet (colour follows the category, never its rank, so filtering doesn't repaint bars).
-// These are the first three slots of a colour-blind-checked categorical palette; the values live in Tailwind
-// arbitrary CSS variables on the wrapper below so each has a light and a dark-mode step.
+// One fixed colour per diet. These are the first three slots of a colour-blind-checked categorical palette; the values
+// live in Tailwind arbitrary CSS variables on the wrapper below so each has a light and a dark-mode step.
 const DIET_COLOR: Record<Diet, string> = {
   carnivore: "var(--diet-carnivore)",
   herbivore: "var(--diet-herbivore)",
   omnivore: "var(--diet-omnivore)",
 };
 
-// Path for a bar whose top corners are rounded (radius r) and whose bottom sits square on the baseline.
-const barPath = (x: number, y: number, w: number, h: number, r: number) => {
-  const radius = Math.min(r, w / 2, h);
-  return `M${x},${y + h}V${y + radius}Q${x},${y} ${x + radius},${y}H${x + w - radius}Q${x + w},${y} ${x + w},${
-    y + radius
-  }V${y + h}Z`;
-};
+const capitalize = (text: string) => text[0]!.toUpperCase() + text.slice(1);
 
 export default function AnimalSpeedGraph() {
   // useRef creates a reference to the div where D3 will draw the chart.
@@ -50,7 +41,6 @@ export default function AnimalSpeedGraph() {
 
   const [animalData, setAnimalData] = useState<AnimalDatum[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [dietFilter, setDietFilter] = useState<Diet | "all">("all");
   const [containerWidth, setContainerWidth] = useState(0);
 
   // Load and tidy the CSV that was cleaned in Python (public/sample_animals.csv is served at /sample_animals.csv).
@@ -85,14 +75,17 @@ export default function AnimalSpeedGraph() {
     return () => observer.disconnect();
   }, []);
 
-  // Memoized so the drawing effect below only re-runs when the data or filter actually changes.
+  // The fastest animals of each diet, in diet order (carnivores, herbivores, omnivores), fastest first within a diet.
+  // Memoized so the drawing effect below only re-runs when the data changes.
   const shown = useMemo(
     () =>
-      animalData
-        .filter((d) => dietFilter === "all" || d.diet === dietFilter)
-        .sort((a, b) => b.speed - a.speed)
-        .slice(0, TOP_N),
-    [animalData, dietFilter],
+      DIETS.flatMap((diet) =>
+        animalData
+          .filter((d) => d.diet === diet)
+          .sort((a, b) => b.speed - a.speed)
+          .slice(0, TOP_PER_DIET),
+      ),
+    [animalData],
   );
 
   useEffect(() => {
@@ -117,9 +110,7 @@ export default function AnimalSpeedGraph() {
       .attr("role", "img")
       .attr(
         "aria-label",
-        `Bar chart of the ${shown.length} fastest ${
-          dietFilter === "all" ? "animals" : dietFilter + "s"
-        } by top speed in km/h. ` + `A data table follows the chart.`,
+        `Bar chart of the ${TOP_PER_DIET} fastest carnivores, herbivores and omnivores by top speed in km/h. A data table follows the chart.`,
       );
 
     const chart = svg.append("g").attr("transform", `translate(${MARGIN.left},${MARGIN.top})`);
@@ -129,16 +120,48 @@ export default function AnimalSpeedGraph() {
     const x = scaleBand()
       .domain(shown.map((d) => d.name))
       .range([0, innerWidth])
-      .padding(0.3);
+      .padding(0.25);
     // https://github.com/d3/d3-scale#linear-scales
+    // A little headroom above the tallest bar so its value label never runs into the group titles.
     const y = scaleLinear()
-      .domain([0, max(shown, (d) => d.speed) ?? 0])
+      .domain([0, (max(shown, (d) => d.speed) ?? 0) * 1.08])
       .nice()
       .range([innerHeight, 0]);
     // https://github.com/d3/d3-scale#ordinal-scales
     const color = scaleOrdinal<Diet, string>()
       .domain([...DIETS])
       .range(DIETS.map((d) => DIET_COLOR[d]));
+
+    // Group backgrounds: one faint tinted block per diet, with its title above it. This is what makes the three
+    // diets read as three groups. Each block spans from its first bar to its last bar, plus half the gap.
+    const halfGap = (x.step() - x.bandwidth()) / 2;
+    const groups = chart.append("g");
+    DIETS.forEach((diet) => {
+      const members = shown.filter((d) => d.diet === diet);
+      const first = members[0];
+      const last = members[members.length - 1];
+      if (!first || !last) return;
+      const left = (x(first.name) ?? 0) - halfGap;
+      const right = (x(last.name) ?? 0) + x.bandwidth() + halfGap;
+      groups
+        .append("rect")
+        .attr("x", left)
+        .attr("y", -26)
+        .attr("width", right - left)
+        .attr("height", innerHeight + 26)
+        .attr("rx", 6)
+        .attr("fill", color(diet))
+        .attr("fill-opacity", 0.08);
+      groups
+        .append("text")
+        .attr("class", "fill-foreground")
+        .attr("x", (left + right) / 2)
+        .attr("y", -9)
+        .attr("text-anchor", "middle")
+        .attr("font-size", 13)
+        .attr("font-weight", 600)
+        .text(`${capitalize(diet)}s`);
+    });
 
     // Horizontal gridlines: hairline and recessive (tick lines that span the plot).
     chart
@@ -153,14 +176,15 @@ export default function AnimalSpeedGraph() {
       .selectAll("line")
       .attr("class", "stroke-border");
 
-    // Bars: one per animal, capped at MAX_BAR_WIDTH and centred in its band, rounded at the top only.
-    const barWidth = Math.min(x.bandwidth(), MAX_BAR_WIDTH);
+    // Bars: one rect per animal. Position comes from the band scale, height from the linear scale.
     const bars = chart.append("g").selectAll("g").data(shown).join("g");
     bars
-      .append("path")
-      .attr("d", (d) =>
-        barPath((x(d.name) ?? 0) + (x.bandwidth() - barWidth) / 2, y(d.speed), barWidth, innerHeight - y(d.speed), 4),
-      )
+      .append("rect")
+      .attr("x", (d) => x(d.name) ?? 0)
+      .attr("y", (d) => y(d.speed))
+      .attr("width", x.bandwidth())
+      .attr("height", (d) => innerHeight - y(d.speed))
+      .attr("rx", 2)
       .attr("fill", (d) => color(d.diet))
       // Native hover tooltip; the values are also always visible (labels below) and in the table.
       .append("title")
@@ -171,7 +195,7 @@ export default function AnimalSpeedGraph() {
       .append("text")
       .attr("class", "fill-foreground")
       .attr("x", (d) => (x(d.name) ?? 0) + x.bandwidth() / 2)
-      .attr("y", (d) => y(d.speed) - 6)
+      .attr("y", (d) => y(d.speed) - 5)
       .attr("text-anchor", "middle")
       .attr("font-size", 11)
       .text((d) => Number(d.speed.toFixed(1)));
@@ -205,7 +229,7 @@ export default function AnimalSpeedGraph() {
       .append("text")
       .attr("class", "fill-foreground")
       .attr("x", MARGIN.left + innerWidth / 2)
-      .attr("y", HEIGHT - 8)
+      .attr("y", HEIGHT - 6)
       .attr("text-anchor", "middle")
       .attr("font-size", 13)
       .text("Animal");
@@ -217,10 +241,10 @@ export default function AnimalSpeedGraph() {
       .attr("font-size", 13)
       .text("Speed (km/h)");
 
-    // Legend (top-right): a colour square + a label in normal text colour for each diet.
-    const legend = svg.append("g").attr("transform", `translate(${width - MARGIN.right - 260},20)`);
+    // Legend (top-right): a colour square + a label for each diet, tied to the ordinal colour scale.
+    const legend = svg.append("g").attr("transform", `translate(${width - MARGIN.right - 250},16)`);
     DIETS.forEach((diet, i) => {
-      const item = legend.append("g").attr("transform", `translate(${i * 88},0)`);
+      const item = legend.append("g").attr("transform", `translate(${i * 84},0)`);
       item.append("rect").attr("width", 12).attr("height", 12).attr("rx", 2).attr("fill", color(diet));
       item
         .append("text")
@@ -228,9 +252,9 @@ export default function AnimalSpeedGraph() {
         .attr("x", 18)
         .attr("y", 10)
         .attr("font-size", 12)
-        .text(diet[0]!.toUpperCase() + diet.slice(1));
+        .text(capitalize(diet));
     });
-  }, [shown, dietFilter, containerWidth]);
+  }, [shown, containerWidth]);
 
   // Summary over every (de-duplicated) animal, so the chart's "fastest only" view doesn't mislead about diet overall.
   const summary = DIETS.map((diet) => {
@@ -247,21 +271,9 @@ export default function AnimalSpeedGraph() {
 
   return (
     <div className="[--diet-carnivore:#eb6834] [--diet-herbivore:#1baf7a] [--diet-omnivore:#2a78d6] dark:[--diet-carnivore:#d95926] dark:[--diet-herbivore:#199e70] dark:[--diet-omnivore:#3987e5]">
-      {/* Diet filter */}
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <span className="mr-1 text-sm text-muted-foreground">Show the {TOP_N} fastest:</span>
-        {(["all", ...DIETS] as const).map((option) => (
-          <Button
-            key={option}
-            size="sm"
-            variant={dietFilter === option ? "default" : "outline"}
-            aria-pressed={dietFilter === option}
-            onClick={() => setDietFilter(option)}
-          >
-            {option === "all" ? "All diets" : option[0]!.toUpperCase() + option.slice(1) + "s"}
-          </Button>
-        ))}
-      </div>
+      <p className="mb-2 text-sm text-muted-foreground">
+        The {TOP_PER_DIET} fastest animals in each diet, top speed in km/h.
+      </p>
 
       {/* The chart scrolls sideways on narrow screens instead of squashing the labels */}
       <div className="overflow-x-auto">
@@ -274,9 +286,9 @@ export default function AnimalSpeedGraph() {
         <div className="mt-6 grid gap-4 sm:grid-cols-3">
           {summary.map(({ diet, count, mean, fastest }) => (
             <div key={diet} className="rounded-lg border p-4">
-              <div className="flex items-center gap-2 text-sm font-medium capitalize">
+              <div className="flex items-center gap-2 text-sm font-medium">
                 <span className="inline-block h-3 w-3 rounded-sm" style={{ backgroundColor: DIET_COLOR[diet] }} />
-                {diet}s ({count})
+                {capitalize(diet)}s ({count})
               </div>
               <p className="mt-2 text-2xl font-semibold">{mean.toFixed(1)} km/h</p>
               <p className="text-sm text-muted-foreground">
@@ -304,7 +316,7 @@ export default function AnimalSpeedGraph() {
                 {shown.map((d) => (
                   <tr key={d.name} className="border-b">
                     <td className="py-1 pr-4">{d.name}</td>
-                    <td className="py-1 pr-4 capitalize">{d.diet}</td>
+                    <td className="py-1 pr-4">{capitalize(d.diet)}</td>
                     <td className="py-1">{Number(d.speed.toFixed(1))}</td>
                   </tr>
                 ))}
