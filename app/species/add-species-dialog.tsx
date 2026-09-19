@@ -238,7 +238,7 @@ export default function AddSpeciesDialog({ userId }: { userId: string }) {
                       <FormControl>
                         <Input
                           value={value ?? ""}
-                          placeholder="https://upload.wikimedia.org/wikipedia/commons/thumb/3/30/George_the_amazing_guinea_pig.jpg/440px-George_the_amazing_guinea_pig.jpg"
+                          placeholder="https://upload.wikimedia.org/wikipedia/commons/thumb/3/30/George_the_amazing_guinea_pig.jpg/500px-George_the_amazing_guinea_pig.jpg"
                           {...rest}
                         />
                       </FormControl>
